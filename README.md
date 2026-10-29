@@ -33,6 +33,17 @@ The post lists Pinecone, Qdrant, Chroma or pgvector. For ~80 PDFs (roughly 5–1
 
 The vector store sits behind LangChain's `VectorStore` interface, so switching is a change of a few lines in `app/ingest.py` and `app/rag.py`. The rest of the pipeline is unaffected.
 
+### What's stored in the index
+
+![Pinecone index browser: docs-rag-demo with 138 records, each with page, source and text metadata](docs/pinecone-index.png)
+
+The `docs-rag-demo` index after ingesting the two sample PDFs:
+
+- **138 records** (6 from `p1779.pdf` + 132 from `p583.pdf`) in a serverless index on `aws / us-east-1`.
+- **Every record carries `source`, `page` and `text`.** That metadata is what the citations ("p583.pdf, page 4") are built from. Records are traceable straight back to the PDF page.
+- **Deterministic IDs** (SHA-1 of source + page + text), so re-running the ingest overwrites the same records instead of duplicating them.
+- **Usage is negligible against the free tier** (707 of 2M write units, 0 GB of 2 GB storage), so the client's ~80 PDFs fit comfortably.
+
 ## How hallucinations are prevented
 
 1. **Exact page metadata.** PDFs are split per page *before* chunking, so a chunk never claims the wrong page.
@@ -119,7 +130,9 @@ app/
 eval/
   questions.json   sample questions (answerable + out-of-scope)
   run_eval.py      evaluation script -> eval/results.md
+  results.md       latest evaluation results
 data/pdfs/    source documents (public-domain IRS publications)
+docs/         screenshots
 ```
 
 ## Known limitations of this demo
