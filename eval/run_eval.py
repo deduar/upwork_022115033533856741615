@@ -5,9 +5,9 @@ Usage: python -m eval.run_eval   -> writes eval/results.md
 import json
 from pathlib import Path
 
-from langchain_openai import ChatOpenAI
+from app import config, llm, rag
 
-from app import config, rag
+JUDGE_SYSTEM = "You grade a support bot. Reply only YES or NO."
 
 JUDGE_PROMPT = """Question: {question}
 Expected answer: {expected}
@@ -15,15 +15,13 @@ Bot answer: {answer}
 
 Does the bot answer contain the expected answer (same meaning, extra detail is fine)? Reply only YES or NO."""
 
-judge = ChatOpenAI(model=config.CHAT_MODEL, temperature=0)
-
 
 def is_correct(q: dict, result: dict) -> bool:
     if not q["in_docs"]:
         return not result["found"]
     if not result["found"]:
         return False
-    verdict = judge.invoke(JUDGE_PROMPT.format(answer=result["answer"], **q)).content
+    verdict = llm.complete(JUDGE_SYSTEM, JUDGE_PROMPT.format(answer=result["answer"], **q), max_tokens=1024)
     return verdict.strip().upper().startswith("YES")
 
 

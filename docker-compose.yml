@@ -6,6 +6,7 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+      - ./eval:/app/eval
   ui:
     build: .
     command: streamlit run app/ui.py --server.port 8501 --server.address 0.0.0.0

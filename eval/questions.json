@@ -1,13 +1,17 @@
 [
   {"question": "How long must I keep records if I file a claim for a loss from worthless securities?", "expected": "7 years", "in_docs": true},
   {"question": "If I don't report income that is more than 25% of the gross income shown on my return, how long is the period of limitations?", "expected": "6 years", "in_docs": true},
+  {"question": "What is the period of limitations if I file a fraudulent return?", "expected": "Not limited (no time limit)", "in_docs": true},
   {"question": "How far in advance should I file Form SS-4 by mail to get an EIN?", "expected": "At least 4 weeks before you need it", "in_docs": true},
+  {"question": "¿Cuánto tarda en obtenerse un EIN si lo solicito por fax?", "expected": "Within 4 business days", "in_docs": true},
   {"question": "What should I do if I haven't received my EIN by the time my return is due?", "expected": "File anyway, write 'Applied for' and the application date in the EIN space", "in_docs": true},
   {"question": "Can I use my social security number instead of an EIN on my tax returns?", "expected": "No", "in_docs": true},
   {"question": "What are the three main categories of facts used to decide if a worker is an employee or independent contractor?", "expected": "Behavioral control, financial control, relationship of the parties", "in_docs": true},
+  {"question": "Does having a significant investment in my work suggest I'm an employee or an independent contractor?", "expected": "It suggests independent contractor, although a significant investment is not required", "in_docs": true},
   {"question": "Which form can I file to get an IRS determination of worker status?", "expected": "Form SS-8", "in_docs": true},
   {"question": "As an independent contractor, which tax form might the business give me?", "expected": "Form 1099-MISC", "in_docs": true},
+  {"question": "What is the 2025 standard mileage rate for business use of a car?", "expected": "The documents explain the standard mileage rate and say it is announced annually by the IRS, but do not give the 2025 amount. The bot must not invent a number.", "in_docs": true},
   {"question": "What is the capital of France?", "expected": "NOT_FOUND", "in_docs": false},
-  {"question": "What is the 2025 standard mileage rate for business use of a car?", "expected": "NOT_FOUND", "in_docs": false},
-  {"question": "How do I reset my password in the customer portal?", "expected": "NOT_FOUND", "in_docs": false}
+  {"question": "How do I reset my password in the customer portal?", "expected": "NOT_FOUND", "in_docs": false},
+  {"question": "What is the corporate income tax rate in Germany?", "expected": "NOT_FOUND", "in_docs": false}
 ]

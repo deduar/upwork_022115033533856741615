@@ -1,10 +1,9 @@
 import re
 from functools import lru_cache
 
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_pinecone import PineconeVectorStore
+from langchain_pinecone import PineconeEmbeddings, PineconeVectorStore
 
-from app import config
+from app import config, llm
 
 SYSTEM_PROMPT = """You are a support assistant. Answer ONLY using the numbered context passages below.
 
@@ -21,13 +20,8 @@ Context:
 def _store() -> PineconeVectorStore:
     return PineconeVectorStore(
         index_name=config.PINECONE_INDEX,
-        embedding=OpenAIEmbeddings(model=config.EMBEDDING_MODEL),
+        embedding=PineconeEmbeddings(model=config.EMBEDDING_MODEL),
     )
-
-
-@lru_cache
-def _llm() -> ChatOpenAI:
-    return ChatOpenAI(model=config.CHAT_MODEL, temperature=0)
 
 
 def retrieve(question: str):
@@ -44,11 +38,9 @@ def answer(question: str) -> dict:
         f"[{i}] ({doc.metadata['source']}, page {int(doc.metadata['page'])})\n{doc.page_content}"
         for i, (doc, _) in enumerate(hits, 1)
     )
-    reply = _llm().invoke(
-        [("system", SYSTEM_PROMPT.format(context=context)), ("human", question)]
-    ).content.strip()
+    reply = llm.complete(SYSTEM_PROMPT.format(context=context), question)
 
-    if "NOT_FOUND" in reply:
+    if not reply or "NOT_FOUND" in reply:
         return {"answer": config.NOT_FOUND_MESSAGE, "sources": [], "found": False}
 
     # Only return the sources the model actually cited.

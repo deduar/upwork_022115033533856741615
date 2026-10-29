@@ -4,7 +4,9 @@ A support chatbot that answers **only** from your own PDFs. Every answer cites t
 
 This repo is a working skeleton of the system described in the job post. It was built to show the architecture and the anti-hallucination approach before the project starts. It uses two public-domain IRS publications as sample documents (`p583` *Starting a Business and Keeping Records*, 30+ pages, and `p1779` *Independent Contractor or Employee*, a multi-column brochure).
 
-**Stack:** Python 3.12 · LangChain · OpenAI (`text-embedding-3-small`, `gpt-4o-mini`) · Pinecone serverless · FastAPI · Streamlit · Docker
+**Stack:** Python 3.12 · LangChain · Claude (`claude-opus-5-5`, official Anthropic SDK) · Pinecone serverless + Pinecone Inference embeddings (`multilingual-e5-large`) · FastAPI · Streamlit · Docker
+
+> **Note on the LLM provider:** the job post specifies the OpenAI API. This demo runs on Claude because that's the key I had available. The LLM call is isolated in `app/llm.py` (~20 lines) and the embeddings in one line of `app/ingest.py` / `app/rag.py`, so switching to OpenAI (`gpt-4o-mini` + `text-embedding-3-small`) is a small, contained change. That switch is part of the full project.
 
 ## Requirements coverage
 
@@ -12,11 +14,11 @@ This repo is a working skeleton of the system described in the job post. It was 
 |---|---|---|
 | 1. Ingest PDFs with clean chunking + metadata | ✅ Page-by-page loading, whitespace cleanup, 1000/150 recursive chunking, `source` + `page` metadata, deterministic IDs (re-ingest doesn't duplicate) | Add section/heading metadata, doc type, handling for tables and multi-column layouts, OCR fallback for scanned PDFs |
 | 2. Vector database | ✅ Pinecone serverless (index auto-created) | Pinecone, or pgvector/Qdrant if you prefer (see below) |
-| 3. RAG with LangChain + OpenAI, citations (doc + page) | ✅ Numbered context, mandatory `[n]` citations, API returns only the sources actually cited | Tune top-k, add reranking / hybrid search |
+| 3. RAG with LangChain + OpenAI, citations (doc + page) | 🟡 LangChain + **Claude** (see note above). Numbered context, mandatory `[n]` citations, API returns only the sources actually cited | Switch to OpenAI as requested, tune top-k, add reranking / hybrid search |
 | 4. "Not in the documents" instead of guessing | ✅ Two layers: similarity threshold (refuses without calling the LLM) + strict prompt with `NOT_FOUND` | Calibrate the threshold on your real questions |
 | FastAPI backend with `/chat` | ✅ `/chat` + `/health`, typed request/response | Auth/API key, rate limiting, logging |
 | 5. Simple chat UI | ✅ Streamlit chat with an expandable sources panel (doc, page, score, excerpt) | Your branding, or a basic React page |
-| Evaluation on 15–20 questions (RAGAS a plus) | 🟡 Script with LLM-judge accuracy, refusal check and citation coverage on 11 sample questions (8 answerable, 3 out-of-scope) | Your 15–20 questions + RAGAS (faithfulness, answer relevancy, context precision) and a written summary |
+| Evaluation on 15–20 questions (RAGAS a plus) | ✅ 15 questions (answerable, out-of-scope, Spanish, and a "partial info" trap), LLM-judged: **14/15 correct, 0 hallucinations, 3/3 out-of-scope refused**. See [eval/results.md](eval/results.md) | Your 15–20 questions + RAGAS (faithfulness, answer relevancy, context precision) |
 | Docker + clear README | ✅ `Dockerfile` + `docker-compose.yml` (API + UI) | Production compose, deploy guide |
 | Deployed or ready to deploy | 🟡 Ready to deploy, not deployed publicly | Deployed to your infrastructure of choice |
 | Loom walkthrough | — | Delivered with the final version |
@@ -25,7 +27,7 @@ This repo is a working skeleton of the system described in the job post. It was 
 
 The post lists Pinecone, Qdrant, Chroma or pgvector. For ~80 PDFs (roughly 5–15k chunks), any of them will perform well, so the choice is about operations:
 
-- **Pinecone serverless (used here):** nothing to host or back up, the free tier comfortably fits this volume, and metadata filtering works out of the box. Best if you want zero infrastructure.
+- **Pinecone serverless (used here):** nothing to host or back up, the free tier comfortably fits this volume, and metadata filtering works out of the box. It can also generate the embeddings (Pinecone Inference), which this demo uses. Best if you want zero infrastructure.
 - **pgvector:** best if you already run Postgres. Everything lives in one database you control.
 - **Qdrant:** best if you want self-hosted, with no external data processor. It's one Docker container.
 
@@ -35,14 +37,14 @@ The vector store sits behind LangChain's `VectorStore` interface, so switching i
 
 1. **Exact page metadata.** PDFs are split per page *before* chunking, so a chunk never claims the wrong page.
 2. **Relevance threshold.** Retrieved chunks below `MIN_SCORE` cosine similarity are discarded. If none remain, the bot answers "not found" **without calling the LLM** at all.
-3. **Strict grounding prompt.** Temperature 0. The model may only use the numbered passages, must cite `[n]` on every claim, and must reply `NOT_FOUND` if the passages don't contain the answer.
+3. **Strict grounding prompt.** The model may only use the numbered passages, must cite `[n]` on every claim, and must reply `NOT_FOUND` if the passages don't contain the answer.
 4. **Cited sources only.** The response includes just the passages the model referenced, so citations can be checked.
 5. **Measured, not assumed.** The eval mixes answerable and out-of-scope questions, so both wrong answers and false refusals show up.
 
 ## Quick start
 
 ```bash
-cp .env.example .env          # set OPENAI_API_KEY and PINECONE_API_KEY
+cp .env.example .env          # set ANTHROPIC_API_KEY and PINECONE_API_KEY
 
 # Docker
 docker compose run --rm api python -m app.ingest   # index data/pdfs/*.pdf
@@ -79,8 +81,12 @@ When nothing relevant is found: `{"answer": "I couldn't find the answer to that 
 
 ## Evaluation
 
+**Results → [eval/results.md](eval/results.md):** **14/15 correct, 0 hallucinations.** All 3 out-of-scope questions were refused, every answer cites the correct document and page, and a Spanish question was answered from the English docs. The one miss is a conservative refusal: the bot said "not found" for a figure the docs don't contain, instead of explaining the related concept.
+
 ```bash
 python -m eval.run_eval      # prints PASS/FAIL per question and writes eval/results.md
+# or with Docker
+docker compose run --rm api python -m eval.run_eval
 ```
 
 - **Accuracy:** answerable questions are judged against the expected answer by an LLM, and out-of-scope questions pass only if refused.
@@ -92,19 +98,20 @@ Questions live in `eval/questions.json` (`question`, `expected`, `in_docs`). Rep
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `OPENAI_API_KEY` / `PINECONE_API_KEY` | — | Required |
+| `ANTHROPIC_API_KEY` / `PINECONE_API_KEY` | — | Required |
 | `PINECONE_INDEX` | `docs-rag-demo` | Index name (auto-created) |
-| `CHAT_MODEL` | `gpt-4o-mini` | Answer + judge model |
-| `EMBEDDING_MODEL` | `text-embedding-3-small` | 1536 dims |
+| `CHAT_MODEL` | `claude-opus-5-5` | Answer + judge model |
+| `EMBEDDING_MODEL` | `multilingual-e5-large` | Pinecone Inference, 1024 dims (also handles non-English questions) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `150` | Characters |
 | `TOP_K` | `5` | Chunks retrieved |
-| `MIN_SCORE` | `0.35` | Refusal threshold (tune with the eval) |
+| `MIN_SCORE` | `0.78` | Refusal threshold. e5 scores sit in a narrow ~0.7–0.9 band, so tune it with the eval |
 
 ## Project layout
 
 ```
 app/
   config.py   settings from env
+  llm.py      Claude call (single place to swap the LLM provider)
   ingest.py   PDF -> pages -> chunks -> Pinecone
   rag.py      retrieve -> threshold -> grounded answer -> cited sources
   api.py      FastAPI (/chat, /health)

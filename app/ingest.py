@@ -8,8 +8,7 @@ import time
 from pathlib import Path
 
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_openai import OpenAIEmbeddings
-from langchain_pinecone import PineconeVectorStore
+from langchain_pinecone import PineconeEmbeddings, PineconeVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pinecone import Pinecone, ServerlessSpec
 
@@ -65,7 +64,7 @@ def main() -> None:
 
     store = PineconeVectorStore(
         index_name=config.PINECONE_INDEX,
-        embedding=OpenAIEmbeddings(model=config.EMBEDDING_MODEL),
+        embedding=PineconeEmbeddings(model=config.EMBEDDING_MODEL),
     )
     store.add_documents(chunks, ids=[chunk_id(c) for c in chunks])
     print(f"Upserted {len(chunks)} chunks into '{config.PINECONE_INDEX}'")
