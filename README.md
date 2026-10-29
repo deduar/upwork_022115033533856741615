@@ -1,37 +1,62 @@
-# Docs RAG Chatbot (demo)
+# Grounded Docs Chatbot (RAG demo)
 
-A chatbot that answers **only** from your PDFs. Every answer cites the document name and page. If the answer isn't in the docs, it says so instead of guessing.
+A support chatbot that answers **only** from your own PDFs. Every answer cites the **document name and page**. If the answer isn't in the documents, it says so instead of guessing.
 
-**Stack:** LangChain · OpenAI (`text-embedding-3-small`, `gpt-4o-mini`) · Pinecone (serverless) · FastAPI · Streamlit · Docker
+This repo is a working skeleton of the system described in the job post. It was built to show the architecture and the anti-hallucination approach before the project starts. It uses two public-domain IRS publications as sample documents (`p583` *Starting a Business and Keeping Records*, 30+ pages, and `p1779` *Independent Contractor or Employee*, a multi-column brochure).
 
-Sample corpus: two public-domain IRS publications (`p583` *Starting a Business and Keeping Records* and `p1779` *Independent Contractor or Employee*).
+**Stack:** Python 3.12 · LangChain · OpenAI (`text-embedding-3-small`, `gpt-4o-mini`) · Pinecone serverless · FastAPI · Streamlit · Docker
+
+## Requirements coverage
+
+| Requirement | Status in this demo | In the full project |
+|---|---|---|
+| 1. Ingest PDFs with clean chunking + metadata | ✅ Page-by-page loading, whitespace cleanup, 1000/150 recursive chunking, `source` + `page` metadata, deterministic IDs (re-ingest doesn't duplicate) | Add section/heading metadata, doc type, handling for tables and multi-column layouts, OCR fallback for scanned PDFs |
+| 2. Vector database | ✅ Pinecone serverless (index auto-created) | Pinecone, or pgvector/Qdrant if you prefer (see below) |
+| 3. RAG with LangChain + OpenAI, citations (doc + page) | ✅ Numbered context, mandatory `[n]` citations, API returns only the sources actually cited | Tune top-k, add reranking / hybrid search |
+| 4. "Not in the documents" instead of guessing | ✅ Two layers: similarity threshold (refuses without calling the LLM) + strict prompt with `NOT_FOUND` | Calibrate the threshold on your real questions |
+| FastAPI backend with `/chat` | ✅ `/chat` + `/health`, typed request/response | Auth/API key, rate limiting, logging |
+| 5. Simple chat UI | ✅ Streamlit chat with an expandable sources panel (doc, page, score, excerpt) | Your branding, or a basic React page |
+| Evaluation on 15–20 questions (RAGAS a plus) | 🟡 Script with LLM-judge accuracy, refusal check and citation coverage on 11 sample questions (8 answerable, 3 out-of-scope) | Your 15–20 questions + RAGAS (faithfulness, answer relevancy, context precision) and a written summary |
+| Docker + clear README | ✅ `Dockerfile` + `docker-compose.yml` (API + UI) | Production compose, deploy guide |
+| Deployed or ready to deploy | 🟡 Ready to deploy, not deployed publicly | Deployed to your infrastructure of choice |
+| Loom walkthrough | — | Delivered with the final version |
+
+## Why Pinecone (and the alternatives)
+
+The post lists Pinecone, Qdrant, Chroma or pgvector. For ~80 PDFs (roughly 5–15k chunks), any of them will perform well, so the choice is about operations:
+
+- **Pinecone serverless (used here):** nothing to host or back up, the free tier comfortably fits this volume, and metadata filtering works out of the box. Best if you want zero infrastructure.
+- **pgvector:** best if you already run Postgres. Everything lives in one database you control.
+- **Qdrant:** best if you want self-hosted, with no external data processor. It's one Docker container.
+
+The vector store sits behind LangChain's `VectorStore` interface, so switching is a change of a few lines in `app/ingest.py` and `app/rag.py`. The rest of the pipeline is unaffected.
 
 ## How hallucinations are prevented
 
-1. **Page-level metadata.** PDFs are loaded one page at a time, so each chunk carries `source` + `page`.
-2. **Retrieval threshold.** Chunks below `MIN_SCORE` cosine similarity are dropped. If nothing survives, the bot refuses **without calling the LLM**.
-3. **Strict prompt.** The model may only use the numbered passages, must cite `[n]` on every claim, and must return `NOT_FOUND` when the context doesn't contain the answer.
-4. **Only cited sources are returned.** The API returns just the passages the model actually referenced.
-5. **Evaluation.** `eval/run_eval.py` measures accuracy (LLM judge), refusal on out-of-scope questions and citation coverage.
+1. **Exact page metadata.** PDFs are split per page *before* chunking, so a chunk never claims the wrong page.
+2. **Relevance threshold.** Retrieved chunks below `MIN_SCORE` cosine similarity are discarded. If none remain, the bot answers "not found" **without calling the LLM** at all.
+3. **Strict grounding prompt.** Temperature 0. The model may only use the numbered passages, must cite `[n]` on every claim, and must reply `NOT_FOUND` if the passages don't contain the answer.
+4. **Cited sources only.** The response includes just the passages the model referenced, so citations can be checked.
+5. **Measured, not assumed.** The eval mixes answerable and out-of-scope questions, so both wrong answers and false refusals show up.
 
 ## Quick start
 
 ```bash
-cp .env.example .env          # add OPENAI_API_KEY and PINECONE_API_KEY
+cp .env.example .env          # set OPENAI_API_KEY and PINECONE_API_KEY
 
-# local
+# Docker
+docker compose run --rm api python -m app.ingest   # index data/pdfs/*.pdf
+docker compose up --build                          # API :8000, UI :8501
+
+# or local
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m app.ingest                       # index data/pdfs/*.pdf into Pinecone
-uvicorn app.api:app --reload               # API on :8000
-streamlit run app/ui.py                    # UI on :8501
-
-# or Docker
-docker compose run --rm api python -m app.ingest
-docker compose up --build                  # API :8000, UI :8501
+python -m app.ingest
+uvicorn app.api:app --reload      # http://localhost:8000/docs
+streamlit run app/ui.py           # http://localhost:8501
 ```
 
-To add documents, drop PDFs into `data/pdfs/` and re-run the ingest. Chunk IDs are deterministic, so re-ingesting doesn't duplicate vectors.
+To add documents, drop PDFs into `data/pdfs/` and re-run the ingest.
 
 ## API
 
@@ -40,21 +65,40 @@ curl -X POST localhost:8000/chat -H 'Content-Type: application/json' \
   -d '{"question": "How long should I keep records for a bad debt deduction?"}'
 ```
 
+Response shape:
+
 ```json
 {
-  "answer": "You should keep them for 7 years [1].",
+  "answer": "Keep them for 7 years [1].",
   "sources": [{"ref": 1, "document": "p583.pdf", "page": 12, "score": 0.61, "excerpt": "..."}],
   "found": true
 }
 ```
 
+When nothing relevant is found: `{"answer": "I couldn't find the answer to that in the documentation...", "sources": [], "found": false}`
+
 ## Evaluation
 
 ```bash
-python -m eval.run_eval      # writes eval/results.md
+python -m eval.run_eval      # prints PASS/FAIL per question and writes eval/results.md
 ```
 
-`eval/questions.json` mixes answerable questions with out-of-scope ones (which must be refused).
+- **Accuracy:** answerable questions are judged against the expected answer by an LLM, and out-of-scope questions pass only if refused.
+- **Citation coverage:** the share of answerable questions that returned at least one source.
+
+Questions live in `eval/questions.json` (`question`, `expected`, `in_docs`). Replace them with your own 15–20 questions.
+
+## Configuration (`.env`)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` / `PINECONE_API_KEY` | — | Required |
+| `PINECONE_INDEX` | `docs-rag-demo` | Index name (auto-created) |
+| `CHAT_MODEL` | `gpt-4o-mini` | Answer + judge model |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | 1536 dims |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `150` | Characters |
+| `TOP_K` | `5` | Chunks retrieved |
+| `MIN_SCORE` | `0.35` | Refusal threshold (tune with the eval) |
 
 ## Project layout
 
@@ -62,16 +106,18 @@ python -m eval.run_eval      # writes eval/results.md
 app/
   config.py   settings from env
   ingest.py   PDF -> pages -> chunks -> Pinecone
-  rag.py      retrieve + threshold + grounded answer + citations
+  rag.py      retrieve -> threshold -> grounded answer -> cited sources
   api.py      FastAPI (/chat, /health)
-  ui.py       Streamlit chat
-eval/         sample questions + evaluation script
-data/pdfs/    source documents
+  ui.py       Streamlit chat UI
+eval/
+  questions.json   sample questions (answerable + out-of-scope)
+  run_eval.py      evaluation script -> eval/results.md
+data/pdfs/    source documents (public-domain IRS publications)
 ```
 
-## Next steps for production
+## Known limitations of this demo
 
-- Hybrid search (BM25 + vectors) and a reranker for exact terms such as form numbers
-- Layout-aware chunking for multi-column PDFs and tables
-- RAGAS metrics (faithfulness, context precision) in CI
-- Auth and rate limiting on `/chat`, plus conversation memory
+- Multi-column PDFs (like `p1779`) can have their columns interleaved by `pypdf`. The full project would use layout-aware parsing (e.g. PyMuPDF/unstructured) for those.
+- No conversation memory: each question is answered on its own.
+- No auth on `/chat`.
+- The eval uses an LLM judge instead of RAGAS. RAGAS is planned for the full project.
